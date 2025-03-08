@@ -30,23 +30,22 @@ import (
 )
 
 var (
-	debug            bool
-	mtu              int
-	endpoints        arrayFlags
-	vpnkitSocket     string
-	qemuSocket       string
-	bessSocket       string
-	stdioSocket      string
-	vfkitSocket      string
-	forwardSocket    arrayFlags
-	forwardDest      arrayFlags
-	forwardUser      arrayFlags
-	forwardIdentify  arrayFlags
-	sshPort          int
-	pidFile          string
-	exitCode         int
-	logFile          string
-	servicesEndpoint string
+	debug           bool
+	mtu             int
+	endpoints       arrayFlags
+	vpnkitSocket    string
+	qemuSocket      string
+	bessSocket      string
+	stdioSocket     string
+	vfkitSocket     string
+	forwardSocket   arrayFlags
+	forwardDest     arrayFlags
+	forwardUser     arrayFlags
+	forwardIdentify arrayFlags
+	sshPort         int
+	pidFile         string
+	exitCode        int
+	logFile         string
 )
 
 const (
@@ -75,7 +74,6 @@ func main() {
 	flag.Var(&forwardIdentify, "forward-identity", "Path to SSH identity key for forwarding")
 	flag.StringVar(&pidFile, "pid-file", "", "Generate a file with the PID in it")
 	flag.StringVar(&logFile, "log-file", "", "Output log messages (logrus) to a given file path")
-	flag.StringVar(&servicesEndpoint, "services", "", "Exposes the same HTTP API as the --listen flag, without the /connect endpoint")
 	flag.Parse()
 
 	if version.ShowVersion() {
@@ -184,7 +182,7 @@ func main() {
 	}
 
 	if c := len(forwardSocket); c != len(forwardDest) || c != len(forwardUser) || c != len(forwardIdentify) {
-		exitWithError(errors.New("--forward-sock, --forward-dest, --forward-user, and --forward-identity must all be specified together, " +
+		exitWithError(errors.New("-forward-sock, --forward-dest, --forward-user, and --forward-identity must all be specified together, " +
 			"the same number of times, or not at all"))
 	}
 
@@ -264,7 +262,7 @@ func main() {
 	}
 
 	groupErrs.Go(func() error {
-		return run(ctx, groupErrs, &config, endpoints, servicesEndpoint)
+		return run(ctx, groupErrs, &config, endpoints)
 	})
 
 	// Wait for something to happen
@@ -312,7 +310,7 @@ func captureFile() string {
 	return "capture.pcap"
 }
 
-func run(ctx context.Context, g *errgroup.Group, configuration *types.Configuration, endpoints []string, servicesEndpoint string) error {
+func run(ctx context.Context, g *errgroup.Group, configuration *types.Configuration, endpoints []string) error {
 	vn, err := virtualnetwork.New(configuration)
 	if err != nil {
 		return err
@@ -326,15 +324,6 @@ func run(ctx context.Context, g *errgroup.Group, configuration *types.Configurat
 			return errors.Wrap(err, "cannot listen")
 		}
 		httpServe(ctx, g, ln, withProfiler(vn))
-	}
-
-	if servicesEndpoint != "" {
-		log.Infof("enabling services API. Listening %s", servicesEndpoint)
-		ln, err := transport.Listen(servicesEndpoint)
-		if err != nil {
-			return errors.Wrap(err, "cannot listen")
-		}
-		httpServe(ctx, g, ln, vn.ServicesMux())
 	}
 
 	ln, err := vn.Listen("tcp", fmt.Sprintf("%s:80", gatewayIP))
@@ -571,7 +560,9 @@ func searchDomains() []string {
 		searchPrefix := "search "
 		for sc.Scan() {
 			if strings.HasPrefix(sc.Text(), searchPrefix) {
-				return parseSearchString(sc.Text(), searchPrefix)
+				searchDomains := strings.Split(strings.TrimPrefix(sc.Text(), searchPrefix), " ")
+				log.Debugf("Using search domains: %v", searchDomains)
+				return searchDomains
 			}
 		}
 		if err := sc.Err(); err != nil {
@@ -580,30 +571,4 @@ func searchDomains() []string {
 		}
 	}
 	return nil
-}
-
-// Parse and sanitize search list
-// macOS has limitation on number of domains (6) and general string length (256 characters)
-// since glibc 2.26 Linux has no limitation on 'search' field
-func parseSearchString(text, searchPrefix string) []string {
-	// macOS allow only 265 characters in search list
-	if runtime.GOOS == "darwin" && len(text) > 256 {
-		log.Errorf("Search domains list is too long, it should not exceed 256 chars on macOS: %d", len(text))
-		text = text[:256]
-		lastSpace := strings.LastIndex(text, " ")
-		if lastSpace != -1 {
-			text = text[:lastSpace]
-		}
-	}
-
-	searchDomains := strings.Split(strings.TrimPrefix(text, searchPrefix), " ")
-	log.Debugf("Using search domains: %v", searchDomains)
-
-	// macOS allow only 6 domains in search list
-	if runtime.GOOS == "darwin" && len(searchDomains) > 6 {
-		log.Errorf("Search domains list is too long, it should not exceed 6 domains on macOS: %d", len(searchDomains))
-		searchDomains = searchDomains[:6]
-	}
-
-	return searchDomains
 }

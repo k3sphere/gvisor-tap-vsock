@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -23,7 +24,11 @@ var _ = ginkgo.Describe("dns add test", func() {
 	var server *Server
 
 	ginkgo.BeforeEach(func() {
-		server, _ = New(nil, nil, []types.Zone{})
+		var err error
+		server, err = New(nil, nil, []types.Zone{})
+		if errors.Is(err, errEmptyResolvConf) {
+			ginkgo.Skip("Skipping test, no DNS Servers found")
+		}
 	})
 
 	ginkgo.It("should add dns zone with ip", func() {
@@ -215,10 +220,10 @@ var _ = ginkgo.Describe("dns add test", func() {
 			Qclass: 1,
 		}
 
-		server.handler.addAnswers(m)
+		r := server.handler.addAnswers(server.handler.tcpClient, m)
 
-		gomega.Expect(m.Answer[0].Header().Name).To(gomega.Equal("redhat.com."))
-		gomega.Expect(m.Answer[0].String()).To(gomega.SatisfyAny(gomega.ContainSubstring("34.235.198.240"), gomega.ContainSubstring("52.200.142.250")))
+		gomega.Expect(r.Answer[0].Header().Name).To(gomega.Equal("redhat.com."))
+		gomega.Expect(r.Answer[0].String()).To(gomega.SatisfyAny(gomega.ContainSubstring("34.235.198.240"), gomega.ContainSubstring("52.200.142.250")))
 	})
 })
 
@@ -230,6 +235,9 @@ type ARecord struct {
 func TestDNS(t *testing.T) {
 	log.Infof("starting test DNS servers")
 	nameserver, cleanup, err := startDNSServer()
+	if errors.Is(err, errEmptyResolvConf) {
+		t.Skip("Failed to setup start DNS server, skipping test")
+	}
 	require.NoError(t, err)
 	defer cleanup()
 	time.Sleep(100 * time.Millisecond)

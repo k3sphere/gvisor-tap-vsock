@@ -19,9 +19,6 @@ type GvproxyCommand struct {
 	// List of endpoints the user wants to listen to
 	endpoints []string
 
-	// List of service endpoints the user wants to listen to
-	servicesEndpoints []string
-
 	// Map of different sockets provided by user (socket-type flag:socket)
 	sockets map[string]string
 
@@ -63,14 +60,6 @@ func (c *GvproxyCommand) AddEndpoint(endpoint string) {
 	}
 
 	c.endpoints = append(c.endpoints, endpoint)
-}
-
-func (c *GvproxyCommand) AddServiceEndpoint(endpoint string) {
-	if len(c.servicesEndpoints) < 1 {
-		c.servicesEndpoints = []string{}
-	}
-
-	c.servicesEndpoints = append(c.servicesEndpoints, endpoint)
 }
 
 func (c *GvproxyCommand) AddVpnkitSocket(socket string) {
@@ -163,18 +152,6 @@ func (c *GvproxyCommand) endpointsToCmdline() []string {
 	return args
 }
 
-func (c *GvproxyCommand) servicesEndpointsToCmdline() []string {
-	args := []string{}
-
-	for _, endpoint := range c.servicesEndpoints {
-		if endpoint != "" {
-			args = append(args, "-services", endpoint)
-		}
-	}
-
-	return args
-}
-
 // ToCmdline converts Command to a properly formatted command for gvproxy based
 // on its fields
 func (c *GvproxyCommand) ToCmdline() []string {
@@ -182,8 +159,6 @@ func (c *GvproxyCommand) ToCmdline() []string {
 
 	// listen (endpoints)
 	args = append(args, c.endpointsToCmdline()...)
-
-	args = append(args, c.servicesEndpointsToCmdline()...)
 
 	// debug
 	if c.Debug {

@@ -12,7 +12,7 @@ var (
 	gitVersion = ""
 	// set through .gitattributes when `git archive` is used
 	// see https://icinga.com/blog/2022/05/25/embedding-git-commit-information-in-go-binaries/
-	gitArchiveVersion = "$Format:%(describe)$"
+	gitArchiveVersion = "v0.8.1"
 )
 
 type version struct {

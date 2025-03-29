@@ -3,6 +3,7 @@ package tap
 import (
 	"net"
 
+	"github.com/containers/gvisor-tap-vsock/pkg/k3sphere"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	log "github.com/sirupsen/logrus"
@@ -20,9 +21,10 @@ type LinkEndpoint struct {
 
 	dispatcher    stack.NetworkDispatcher
 	networkSwitch NetworkSwitch
+	p2pHost       *k3sphere.P2P
 }
 
-func NewLinkEndpoint(debug bool, mtu int, macAddress string, ip string, virtualIPs []string) (*LinkEndpoint, error) {
+func NewLinkEndpoint(debug bool, mtu int, macAddress string, ip string, virtualIPs []string, p2pHost *k3sphere.P2P) (*LinkEndpoint, error) {
 	linkAddr, err := net.ParseMAC(macAddress)
 	if err != nil {
 		return nil, err
@@ -37,6 +39,7 @@ func NewLinkEndpoint(debug bool, mtu int, macAddress string, ip string, virtualI
 		mac:        tcpip.LinkAddress(linkAddr),
 		ip:         ip,
 		virtualIPs: set,
+		p2pHost:    p2pHost,
 	}, nil
 }
 
@@ -122,7 +125,9 @@ func (e *LinkEndpoint) writePacket(r stack.RouteInfo, protocol tcpip.NetworkProt
 		h.Op() == header.ARPReply {
 		ip := tcpip.AddrFromSlice(h.ProtocolAddressSender()).String()
 		_, ok := e.virtualIPs[ip]
-		if ip != e.IP() && !ok {
+		_, ok2 := e.p2pHost.GetPeerByIP(tcpip.AddrFrom4Slice(net.ParseIP(ip).To4()))
+		if ip != e.IP() && !ok && !ok2 {
+			// Log all keys using logrus
 			log.Debugf("dropping spoofing packets from the gateway about IP %s", ip)
 			return nil
 		}

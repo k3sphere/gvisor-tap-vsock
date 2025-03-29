@@ -1,11 +1,13 @@
 package virtualnetwork
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 
+	"github.com/containers/gvisor-tap-vsock/pkg/k3sphere"
 	"github.com/containers/gvisor-tap-vsock/pkg/services/dhcp"
 	"github.com/containers/gvisor-tap-vsock/pkg/services/dns"
 	"github.com/containers/gvisor-tap-vsock/pkg/services/forwarder"
@@ -20,13 +22,13 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 )
 
-func addServices(configuration *types.Configuration, s *stack.Stack, ipPool *tap.IPPool) (http.Handler, error) {
+func addServices(ctx context.Context, configuration *types.Configuration, s *stack.Stack, ipPool *tap.IPPool, p2pHost *k3sphere.P2P) (http.Handler, error) {
 	var natLock sync.Mutex
 	translation := parseNATTable(configuration)
 
-	tcpForwarder := forwarder.TCP(s, translation, &natLock)
+	tcpForwarder := forwarder.TCP(ctx, s, translation, &natLock, p2pHost)
 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
-	udpForwarder := forwarder.UDP(s, translation, &natLock)
+	udpForwarder := forwarder.UDP(ctx, s, translation, &natLock, p2pHost)
 	s.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
 
 	dnsMux, err := dnsServer(configuration, s)

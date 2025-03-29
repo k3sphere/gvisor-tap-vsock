@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -17,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/containers/gvisor-tap-vsock/pkg/k3sphere"
 	"github.com/containers/gvisor-tap-vsock/pkg/net/stdio"
 	"github.com/containers/gvisor-tap-vsock/pkg/sshclient"
 	"github.com/containers/gvisor-tap-vsock/pkg/transport"
@@ -24,6 +27,8 @@ import (
 	"github.com/containers/gvisor-tap-vsock/pkg/virtualnetwork"
 	"github.com/containers/winquit/pkg/winquit"
 	"github.com/dustin/go-humanize"
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -47,14 +52,21 @@ var (
 	exitCode         int
 	logFile          string
 	servicesEndpoint string
+    
+    ip              string
+    gatewayIP       string
+    hostIP          string
+    subnet          string
+    vlan            string
+    password        string
+    key             string
+    relay           string
+    swarmKey        string
+	trust           string
 )
 
 const (
-	gatewayIP   = "192.168.127.1"
-	sshHostPort = "192.168.127.2:22"
-	hostIP      = "192.168.127.254"
-	host        = "host"
-	gateway     = "gateway"
+	gateway = "gateway"
 )
 
 func main() {
@@ -83,6 +95,13 @@ func main() {
 		os.Exit(0)
 	}
 
+	userHomeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("Failed to get user home directory: %v", err)
+	}
+	if logFile == "" {
+		logFile = fmt.Sprintf("%s/gvproxy.log", userHomeDir)
+	}
 	// If the user provides a log-file, we re-direct log messages
 	// from logrus to the file
 	if logFile != "" {
@@ -105,10 +124,144 @@ func main() {
 		log.Debugf("command line: %q", os.Args)
 	}
 
+	
+	const keyFileName = "gvproxy.conf"
+	keyFilePath := fmt.Sprintf("%s/%s", userHomeDir, keyFileName)
+
+
+
+	var config1 k3sphere.Config
+	if _, err := os.Stat(keyFilePath); err == nil {
+		file, err := os.Open(keyFilePath)
+		if err != nil {
+			log.Errorf("unable to open config file: %q", err)
+		} else {
+			defer file.Close()
+			decoder := json.NewDecoder(file)
+			if err := decoder.Decode(&config1); err != nil {
+				log.Errorf("error decoding config file: %q", err)
+			} else {
+				ip = config1.IP
+				subnet = config1.Subnet
+				gatewayIP = config1.GatewayIP
+				hostIP = config1.HostIP
+				vlan = config1.VLAN
+				key = config1.Key
+				relay = config1.Relay
+				trust = config1.Trust
+			}
+		}
+	}else if(os.Getenv("JOIN_KEY") != ""){
+		// when config file does not exist, use join key to fetch config from cloud
+		joinKey := os.Getenv("JOIN_KEY")
+
+		// If not, generate a new one
+		privKey, pubKey, err := crypto.GenerateKeyPair(crypto.Ed25519, 0)
+		if err != nil {
+			log.Errorf("error generating key pair: %q", err)
+		}
+
+		// Extract peer.ID from pubKey
+		peerID, err := peer.IDFromPublicKey(pubKey)
+		if err != nil {
+			log.Errorf("error extracting peer ID from public key: %q", err)
+		}
+		log.Infof("Generated new peer ID: %s", peerID)
+
+		// Save the generated private key to the file
+		privKeyBytes, err := crypto.MarshalPrivateKey(privKey)
+		if err != nil {
+			log.Errorf("error decoding config file: %q", err)
+		}
+		key = base64.StdEncoding.EncodeToString(privKeyBytes)
+		client := &http.Client{
+			Timeout: 10 * time.Second,
+		}
+		port := sshPort
+		username := "user"
+		if runtime.GOOS == "darwin" {
+			port = 22
+			username = "core"
+		}else if runtime.GOOS == "windows" {
+			// need to read ssh port for config file
+		}
+		joinInfo := k3sphere.JoinInfo{
+			Id:       peerID.String(),
+			Platform: runtime.GOOS,
+			Arch:    runtime.GOARCH,
+			Version: version.String(),
+			Name:     func() string { h, _ := os.Hostname(); return h }(),
+			Port:  port,
+			Username: username,
+		}
+		body, err := json.Marshal(joinInfo)
+		if err != nil {
+			log.Fatalf("Failed to marshal join info: %v", err)
+		}
+		req, err := http.NewRequest("POST", "https://k3sphere.com/api/join", strings.NewReader(string(body)))
+		if err != nil {
+			log.Fatalf("Failed to create request: %v", err)
+		}
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", joinKey))
+
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Fatalf("Failed to fetch config from cloud: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			log.Fatalf("Failed to fetch config from cloud: %s", resp.Status)
+		}
+
+
+		if err := json.NewDecoder(resp.Body).Decode(&config1); err != nil {
+			log.Fatalf("Failed to decode config: %v", err)
+		}
+		config1.Key = key
+		// save the config to file
+		file, err := os.Create(keyFilePath)
+		if err != nil {
+			log.Errorf("unable to create config file: %q", err)
+		} else {
+			defer file.Close()
+			encoder := json.NewEncoder(file)
+			if err := encoder.Encode(config1); err != nil {
+				log.Errorf("error encoding config file: %q", err)
+			}
+		}
+		ip = config1.IP
+		subnet = config1.Subnet
+		gatewayIP = config1.GatewayIP
+		hostIP = config1.HostIP
+		vlan = config1.VLAN
+		relay = config1.Relay
+		trust = config1.Trust
+	}else {
+		// when config file does not exist, use environment variables to set up the network
+		ip, gatewayIP, hostIP, subnet, _ = k3sphere.CalculateIPs(os.Getenv("IP"))
+		log.Info("ip address", ip, gatewayIP, hostIP, subnet)
+		vlan = os.Getenv("VLAN")
+		if vlan == "" {
+			vlan = "default"
+		}
+	}
+
+	password = os.Getenv("VLAN_PASSWORD")
+	if password == "" {
+		password = "default"
+	}
+
+
 	log.Info(version.String())
 	ctx, cancel := context.WithCancel(context.Background())
 	// Make this the last defer statement in the stack
 	defer os.Exit(exitCode)
+
+
+	// Create a new P2PHost
+	p2phost := k3sphere.NewP2P(key, relay, swarmKey)
+	log.Infof("Completed P2P Setup %s", relay)
 
 	groupErrs, ctx := errgroup.WithContext(ctx)
 	// Setup signal channel for catching user signals
@@ -217,11 +370,11 @@ func main() {
 		Debug:             debug,
 		CaptureFile:       captureFile(),
 		MTU:               mtu,
-		Subnet:            "192.168.127.0/24",
+		Subnet:            subnet,
 		GatewayIP:         gatewayIP,
 		GatewayMacAddress: "5a:94:ef:e4:0c:dd",
 		DHCPStaticLeases: map[string]string{
-			"192.168.127.2": "5a:94:ef:e4:0c:ee",
+			ip: "5a:94:ef:e4:0c:ee",
 		},
 		DNS: []types.Zone{
 			{
@@ -232,7 +385,7 @@ func main() {
 						IP:   net.ParseIP(gatewayIP),
 					},
 					{
-						Name: host,
+						Name: "host",
 						IP:   net.ParseIP(hostIP),
 					},
 				},
@@ -245,14 +398,14 @@ func main() {
 						IP:   net.ParseIP(gatewayIP),
 					},
 					{
-						Name: host,
+						Name: "host",
 						IP:   net.ParseIP(hostIP),
 					},
 				},
 			},
 		},
 		DNSSearchDomains: searchDomains(),
-		Forwards:         getForwardsMap(sshPort, sshHostPort),
+		Forwards:         getForwardsMap(sshPort, fmt.Sprintf("%s:22", ip)),
 		NAT: map[string]string{
 			hostIP: "127.0.0.1",
 		},
@@ -264,7 +417,7 @@ func main() {
 	}
 
 	groupErrs.Go(func() error {
-		return run(ctx, groupErrs, &config, endpoints, servicesEndpoint)
+		return run(ctx, groupErrs, &config, endpoints, servicesEndpoint,p2phost)
 	})
 
 	// Wait for something to happen
@@ -278,6 +431,14 @@ func main() {
 			return nil
 		}
 	})
+
+
+	groupErrs.Go(func() error {
+		return k3sphere.ConnectLibp2p(ctx, p2phost, config1, password, "podman")
+	})
+
+
+
 	// Wait for all of the go funcs to finish up
 	if err := groupErrs.Wait(); err != nil {
 		log.Errorf("gvproxy exiting: %v", err)
@@ -312,8 +473,8 @@ func captureFile() string {
 	return "capture.pcap"
 }
 
-func run(ctx context.Context, g *errgroup.Group, configuration *types.Configuration, endpoints []string, servicesEndpoint string) error {
-	vn, err := virtualnetwork.New(configuration)
+func run(ctx context.Context, g *errgroup.Group, configuration *types.Configuration, endpoints []string, servicesEndpoint string,p2phost *k3sphere.P2P) error {
+	vn, err := virtualnetwork.New(ctx,configuration, p2phost)
 	if err != nil {
 		return err
 	}
@@ -447,8 +608,7 @@ func run(ctx context.Context, g *errgroup.Group, configuration *types.Configurat
 			if err := conn.Close(); err != nil {
 				log.Errorf("error closing %s: %q", vfkitSocket, err)
 			}
-			vfkitSocketURI, _ := url.Parse(vfkitSocket)
-			return os.Remove(vfkitSocketURI.Path)
+			return os.Remove(vfkitSocket)
 		})
 
 		g.Go(func() error {
@@ -487,7 +647,7 @@ func run(ctx context.Context, g *errgroup.Group, configuration *types.Configurat
 		dest := &url.URL{
 			Scheme: "ssh",
 			User:   url.User(forwardUser[i]),
-			Host:   sshHostPort,
+			Host:   fmt.Sprintf("%s:22", ip),
 			Path:   forwardDest[i],
 		}
 		j := i

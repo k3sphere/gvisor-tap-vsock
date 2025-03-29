@@ -1,11 +1,13 @@
 package virtualnetwork
 
 import (
+	"context"
 	"math"
 	"net"
 	"net/http"
 	"os"
 
+	"github.com/containers/gvisor-tap-vsock/pkg/k3sphere"
 	"github.com/containers/gvisor-tap-vsock/pkg/tap"
 	"github.com/containers/gvisor-tap-vsock/pkg/types"
 	"github.com/pkg/errors"
@@ -27,7 +29,7 @@ type VirtualNetwork struct {
 	ipPool        *tap.IPPool
 }
 
-func New(configuration *types.Configuration) (*VirtualNetwork, error) {
+func New(ctx context.Context, configuration *types.Configuration, p2pHost *k3sphere.P2P) (*VirtualNetwork, error) {
 	_, subnet, err := net.ParseCIDR(configuration.Subnet)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot parse subnet cidr")
@@ -41,7 +43,7 @@ func New(configuration *types.Configuration) (*VirtualNetwork, error) {
 		ipPool.Reserve(net.ParseIP(ip), mac)
 	}
 
-	tapEndpoint, err := tap.NewLinkEndpoint(configuration.Debug, configuration.MTU, configuration.GatewayMacAddress, configuration.GatewayIP, configuration.GatewayVirtualIPs)
+	tapEndpoint, err := tap.NewLinkEndpoint(configuration.Debug, configuration.MTU, configuration.GatewayMacAddress, configuration.GatewayIP, configuration.GatewayVirtualIPs, p2pHost)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot create tap endpoint")
 	}
@@ -68,7 +70,7 @@ func New(configuration *types.Configuration) (*VirtualNetwork, error) {
 		return nil, errors.Wrap(err, "cannot create network stack")
 	}
 
-	mux, err := addServices(configuration, stack, ipPool)
+	mux, err := addServices(ctx, configuration, stack, ipPool, p2pHost)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot add network services")
 	}

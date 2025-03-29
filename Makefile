@@ -59,6 +59,8 @@ cross: $(TOOLS_BINDIR)/makefat
 	GOARCH=arm64 GOOS=windows  go build -ldflags "$(LDFLAGS)" -o bin/gvproxy-windows-arm64.exe ./cmd/gvproxy
 	GOARCH=amd64 GOOS=linux   go build -ldflags "$(LDFLAGS)" -o bin/gvproxy-linux-amd64 ./cmd/gvproxy
 	GOARCH=arm64 GOOS=linux   go build -ldflags "$(LDFLAGS)" -o bin/gvproxy-linux-arm64 ./cmd/gvproxy
+	GOARCH=amd64 GOOS=linux   go build -ldflags "$(LDFLAGS)" -o bin/vpn-linux-amd64 ./cmd/vpn
+	GOARCH=arm64 GOOS=linux   go build -ldflags "$(LDFLAGS)" -o bin/vpn-linux-arm64 ./cmd/vpn
 	GOARCH=amd64 GOOS=darwin  go build -ldflags "$(LDFLAGS)" -o bin/gvproxy-darwin-amd64 ./cmd/gvproxy
 	GOARCH=arm64 GOOS=darwin  go build -ldflags "$(LDFLAGS)" -o bin/gvproxy-darwin-arm64 ./cmd/gvproxy
 	cd bin && $(TOOLS_BINDIR)/makefat gvproxy-darwin gvproxy-darwin-amd64 gvproxy-darwin-arm64 && rm gvproxy-darwin-amd64 gvproxy-darwin-arm64

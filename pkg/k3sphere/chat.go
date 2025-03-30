@@ -43,12 +43,12 @@ spec:
       accessMode: ReadWriteOnce
       size: 128Mi
       path: /data
-    certResolvers: 
+    certificatesResolvers: 
       letsencrypt:
-        email: %s
-        storage: /data/acme.json
-        httpChallenge: 
-          entryPoint: web
+        acme:
+          storage: /data/acme.json
+          httpChallenge: 
+            entryPoint: web
 `
 
 // A structure that represents a PubSub Chat Room

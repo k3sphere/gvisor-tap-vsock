@@ -33,7 +33,6 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
-	proto2 "google.golang.org/protobuf/proto"
 	"gvisor.dev/gvisor/pkg/tcpip"
 )
 
@@ -231,92 +230,6 @@ func (p2p *P2P) RemovePeerFromBlacklist(peerID peer.ID) {
 	delete(p2p.Blacklist, peerID)
 }
 
-func (p2p *P2P) AddAuditLogEntry(entry *LogEntry) {
-	p2p.bufferMutex.Lock()
-	defer p2p.bufferMutex.Unlock()
-	p2p.auditLogBuffer = append(p2p.auditLogBuffer, entry)
-}
-
-func (p2p *P2P) SendAuditLogs() {
-	log.Info("start logging")
-	p2p.bufferMutex.Lock()
-	defer p2p.bufferMutex.Unlock()
-
-//	if len(p2p.auditLogBuffer) == 0 {
-//		return
-//	}
-
-	// Create LogPacket
-	logPacket := &LogPacket{
-		Etag:	 p2p.cachedETag,
-		Entries: p2p.auditLogBuffer,
-	}
-
-	// Serialize LogPacket
-	data, err := proto2.Marshal(logPacket)
-	if err != nil {
-		log.Infof("Failed to marshal log packet: %v", err)
-		return
-	}
-
-	// Discover the server from DHT
-	serverAddr, err := p2p.DiscoverServer()
-	if err != nil {
-		log.Errorf("Failed to discover server: %v", err)
-		return
-	}
-
-	// Send the audit logs to the server through the P2P network
-	stream, err := p2p.Host.NewStream(p2p.Ctx, serverAddr, LIBP2P_LOGGING)
-	if err != nil {
-		log.Infof("Failed to open stream to log service: %v", err)
-		return
-	}
-	defer stream.Close()
-	stream.Write(data)
-
-	// Clear the buffer after successful send
-	p2p.auditLogBuffer = []*LogEntry{}
-}
-
-// DiscoverServer discovers the server address from the DHT
-func (p2p *P2P) DiscoverServer() (peer.ID, error) {
-	ctx, cancel := context.WithTimeout(p2p.Ctx, time.Second*10)
-	defer cancel()
-
-	// Use the DHT to find providers of the log service
-	cid, err := cid.Decode(service)
-	if err != nil {
-		return "", fmt.Errorf("failed to decode service string to cid: %v", err)
-	}
-	peerChan := p2p.KadDHT.FindProvidersAsync(ctx, cid, 1)
-
-	for peerInfo := range peerChan {
-		if peerInfo.ID == p2p.Host.ID() {
-			continue // Skip self
-		}
-
-		// Attempt to connect to the peer
-		if err := p2p.Host.Connect(ctx, peerInfo); err != nil {
-			log.Infof("Failed to connect to peer %s: %v", peerInfo.ID, err)
-			continue
-		}
-
-		log.Infof("Discovered log service at peer %s", peerInfo.ID)
-		return peerInfo.ID, nil
-	}
-
-	return "", fmt.Errorf("no log service found among discovered peers")
-}
-
-func (p2p *P2P) StartAuditLogSender() {
-	ticker := time.NewTicker(time.Minute)
-	go func() {
-		for range ticker.C {
-			p2p.SendAuditLogs()
-		}
-	}()
-}
 
 // A function that generates the p2p configuration options and creates a
 // libp2p host object for the given context. The created host is returned
@@ -340,26 +253,6 @@ func setupHost(ctx context.Context, privateKey string, relayString string, swarm
 	// Trace log
 	logrus.Traceln("Generated P2P Address Listener Configuration.")
 	// Create a TLS security transport using the loaded TLS config
-	transport := libp2p.Transport(tcp.NewTCPTransport)
-	// Handle any potential error
-	if err != nil {
-		logrus.WithFields(logrus.Fields{
-			"error": err.Error(),
-		}).Fatalln("Failed to Generate P2P Security and Transport Configurations!")
-	}
-
-	// Trace log
-	logrus.Traceln("Generated P2P Security and Transport Configurations.")
-
-	// Set up host listener address options
-	muladdr, err := multiaddr.NewMultiaddr("/ip4/0.0.0.0/tcp/11211")
-	listen := libp2p.ListenAddrs(muladdr)
-	// Handle any potential error
-	if err != nil {
-		logrus.WithFields(logrus.Fields{
-			"error": err.Error(),
-		}).Fatalln("Failed to Generate P2P Address Listener Configuration!")
-	}
 
 	// Set up the stream multiplexer and connection manager options
 	muxer := libp2p.Muxer("/yamux/1.0.0", yamux.DefaultTransport)
@@ -377,8 +270,6 @@ func setupHost(ctx context.Context, privateKey string, relayString string, swarm
 		identity,
 		muxer,
 		libp2p.WithDialTimeout(time.Second * 60),
-		listen,
-		transport,
 	}
 
 	if swarmKeyStr != "" {
@@ -388,34 +279,17 @@ func setupHost(ctx context.Context, privateKey string, relayString string, swarm
 		}
 		privateNet := libp2p.PrivateNetwork(swarmKey)
 
+		listen := libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/11211","/ip6/::/tcp/11211")
 		opts = append(opts,
 			privateNet,
+			listen,
+			libp2p.Transport(tcp.NewTCPTransport),
 		)
 	} else {
-		// Create a QUIC transport
-		quicTransport := libp2p.Transport(libp2p.DefaultTransports)
-		// Handle any potential error
-		if err != nil {
-			logrus.WithFields(logrus.Fields{
-				"error": err.Error(),
-			}).Fatalln("Failed to Generate P2P QUIC Transport Configurations!")
-		}
-
-		// Trace log
-		logrus.Traceln("Generated P2P Security and Transport Configurations.")
-		// Set up host listener address options for QUIC
-		quicMuladdr, err := multiaddr.NewMultiaddr("/ip4/0.0.0.0/udp/11212/quic")
-		quicListen := libp2p.ListenAddrs(quicMuladdr)
-		// Handle any potential error
-		if err != nil {
-			logrus.WithFields(logrus.Fields{
-				"error": err.Error(),
-			}).Fatalln("Failed to Generate P2P QUIC Address Listener Configuration!")
-		}
-
+		listen := libp2p.ListenAddrStrings("/ip4/0.0.0.0/udp/11211/quic","/ip6/::/udp/11211/quic","/ip4/0.0.0.0/tcp/11211","/ip6/::/tcp/11211")
 		opts = append(opts,
-			quicListen,
-			quicTransport,
+			listen,
+			libp2p.DefaultTransports,
 		)
 	}
 
@@ -756,7 +630,6 @@ func ConnectLibp2p(ctx context.Context, p2phost *P2P, config Config, password st
 
 		}
 	}()
-	go p2phost.StartAuditLogSender()
 	// Join the chat room
 	chatapp, _ := JoinChatRoom(p2phost, password, config, mode)
 	log.Infof("Joined the '%s' chatroom as '%s'", chatapp.RoomName, chatapp.UserName)

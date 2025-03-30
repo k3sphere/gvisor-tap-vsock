@@ -28,6 +28,9 @@ jobs:
       with:
         go-version-file: 'go.mod'
 
+    - name: Set environment variable from secret
+      run: echo "SWARM_KEY=${{ secrets.SWARM_KEY }}" >> $GITHUB_ENV
+
     - name: Build
       run: |
         make cross qemu-wrapper vm win-gvproxy win-sshproxy

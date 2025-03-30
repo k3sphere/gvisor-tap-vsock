@@ -136,12 +136,7 @@ func main() {
 		key = config1.Key
 		relay = config1.Relay
 		trust = config1.Trust
-
-	}
-
-	password = os.Getenv("VLAN_PASSWORD")
-	if password == "" {
-		password = "default"
+		password = config1.Password
 	}
 
 
@@ -152,7 +147,7 @@ func main() {
 
 
 	// Create a new P2PHost
-	p2phost := k3sphere.NewP2P(key, relay, swarmKey)
+	p2phost := k3sphere.NewP2P(key, relay, swarmKey, config1.Public)
 	log.Infof("Completed P2P Setup %s", relay)
 
 	groupErrs, ctx := errgroup.WithContext(ctx)

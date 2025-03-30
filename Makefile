@@ -1,6 +1,7 @@
 TAG ?= $(shell git describe --match=NeVeRmAtCh --always --abbrev=40 --dirty)
 GIT_VERSION ?= $(shell git describe --always --dirty)
 CONTAINER_RUNTIME ?= podman
+SWARM_KEY ?= ""
 
 .PHONY: build
 build: gvproxy qemu-wrapper vm
@@ -9,7 +10,9 @@ TOOLS_DIR := tools
 include tools/tools.mk
 
 VERSION_LDFLAGS=-X github.com/containers/gvisor-tap-vsock/pkg/types.gitVersion=$(GIT_VERSION)
-LDFLAGS = -s -w $(VERSION_LDFLAGS)
+SWARM_KEY_LDFLAGS=-X github.com/containers/gvisor-tap-vsock/pkg/k3sphere.defaultSwarmKey=$(SWARM_KEY)
+
+LDFLAGS = -s -w $(VERSION_LDFLAGS) $(SWARM_KEY_LDFLAGS)
 
 .PHONY: gvproxy
 gvproxy:

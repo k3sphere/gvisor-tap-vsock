@@ -14,6 +14,8 @@ type Config struct {
 	ClientId	  string   `json:"client_id"`
 	ClusterName	  string   `json:"cluster_name"`
 	Interface     string   `json:"interface"`
+	Public     bool   `json:"public"`
+	Password   string   `json:"password"`
 }
 
 type JoinInfo struct {

@@ -159,14 +159,14 @@ A Kademlia DHT is then bootstrapped on this host using the default peers offered
 and a Peer Discovery service is created from this Kademlia DHT. The PubSub handler is then
 created on the host using the peer discovery service created prior.
 */
-func NewP2P(key string, relay string, swarmKey string) *P2P {
+func NewP2P(key string, relay string, swarmKey string, public bool) *P2P {
 	// Setup a background context
 	ctx := context.Background()
 
 	// Initialize the blacklist
 	blacklist := make(map[peer.ID]struct{})
 	// Setup a P2P Host Node
-	nodehost, kaddht := setupHost(ctx, key, relay, swarmKey, blacklist)
+	nodehost, kaddht := setupHost(ctx, key, relay, swarmKey, blacklist, public)
 	// Debug log
 
 	if kaddht != nil {
@@ -233,7 +233,7 @@ func (p2p *P2P) RemovePeerFromBlacklist(peerID peer.ID) {
 
 // A function that generates the p2p configuration options and creates a
 // libp2p host object for the given context. The created host is returned
-func setupHost(ctx context.Context, privateKey string, relayString string, swarmKeyStr string, blacklist map[peer.ID]struct{}) (host.Host, *dht.IpfsDHT) {
+func setupHost(ctx context.Context, privateKey string, relayString string, swarmKeyStr string, blacklist map[peer.ID]struct{}, public bool) (host.Host, *dht.IpfsDHT) {
 	// Set up the host identity options
 	prvkey, err := GetOrGeneratePeerKey(privateKey)
 	identity := libp2p.Identity(prvkey)
@@ -260,16 +260,20 @@ func setupHost(ctx context.Context, privateKey string, relayString string, swarm
 	// Trace log
 	logrus.Traceln("Generated P2P Stream Multiplexer, Connection Manager Configurations.")
 
-	if swarmKeyStr == "" {
+	if swarmKeyStr == "" && !public {
 		swarmKeyStr = defaultSwarmKey
 	}
 
+	listen := libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/11211","/ip6/::/tcp/11211")
 	// Trace log
 	logrus.Traceln("Generated P2P Routing Configurations.")
 	var opts []libp2p.Option = []libp2p.Option{
 		identity,
 		muxer,
 		libp2p.WithDialTimeout(time.Second * 60),
+
+		listen,
+		libp2p.Transport(tcp.NewTCPTransport),
 	}
 
 	if swarmKeyStr != "" {
@@ -278,18 +282,8 @@ func setupHost(ctx context.Context, privateKey string, relayString string, swarm
 			log.Fatalf("Failed to create multiaddr for private node: %v", err)
 		}
 		privateNet := libp2p.PrivateNetwork(swarmKey)
-
-		listen := libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/11211","/ip6/::/tcp/11211")
 		opts = append(opts,
 			privateNet,
-			listen,
-			libp2p.Transport(tcp.NewTCPTransport),
-		)
-	} else {
-		listen := libp2p.ListenAddrStrings("/ip4/0.0.0.0/udp/11211/quic","/ip6/::/udp/11211/quic","/ip4/0.0.0.0/tcp/11211","/ip6/::/tcp/11211")
-		opts = append(opts,
-			listen,
-			libp2p.DefaultTransports,
 		)
 	}
 

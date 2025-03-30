@@ -99,6 +99,8 @@ func NewConfig(keyFilePath string, version string) (*Config, error) {
 			log.Fatalf("Failed to decode config: %v", err)
 		}
 		config1.Key = key
+		config1.Public = false
+		config1.Password = os.Getenv("VLAN_PASSWORD")
 		// save the config to file
 		file, err := os.Create(keyFilePath)
 		if err != nil {
@@ -154,7 +156,20 @@ func NewConfig(keyFilePath string, version string) (*Config, error) {
             VLAN:      vlan,
             Key:      key,
             Interface: iface,
+			Public: true,
+			Password: os.Getenv("VLAN_PASSWORD"),
         }
+
+		file, err := os.Create(keyFilePath)
+		if err != nil {
+			log.Errorf("unable to create config file: %q", err)
+		} else {
+			defer file.Close()
+			encoder := json.NewEncoder(file)
+			if err := encoder.Encode(config1); err != nil {
+				log.Errorf("error encoding config file: %q", err)
+			}
+		}
 
 	}
 

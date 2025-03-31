@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -50,6 +52,13 @@ spec:
           httpChallenge: 
             entryPoint: web
 `
+
+type Payload struct {
+	IP      string `json:"ip"`
+	PublicKey  string `json:"publicKey"`
+	Host    string `json:"host"`
+	OIDC    bool   `json:"oidc"`
+}
 
 // A structure that represents a PubSub Chat Room
 type ChatRoom struct {
@@ -294,6 +303,171 @@ func executeCommand(stream network.Stream, mode string, formData FormSchema, con
 				return
 			}
 			stream.Write([]byte(fmt.Sprintf("create k3scluster output: %s\n", strings.TrimSpace(string(output)))))
+		}
+	case "registerK3s":
+		if mode == "podman" {
+			 // Construct the command to attach the SSH key
+			 cmd := exec.Command("podman", "machine", "ssh", "base64 -w 0 /var/lib/rancher/k3s/server/tls/server-ca.crt")
+			
+			 // Run the command and pipe output to the stream
+			 output, err := cmd.CombinedOutput()
+			 if err != nil {
+				 stream.Write([]byte(fmt.Sprintf("failed to attach SSH key: %v\n", err)))
+				 return
+			 }
+
+			// Data to be sent in JSON format
+			data := Payload{
+				IP: config.IP,
+				Host: stream.Conn().LocalPeer().String(),
+				PublicKey:    string(output),
+			}
+
+			// Marshal the data to JSON
+			jsonData, err := json.Marshal(data)
+			if err != nil {
+				fmt.Println("Error marshaling JSON:", err)
+				os.Exit(1)
+			}
+
+			url := "https://k3sphere.com/api/cluster/register"
+			// Create a new HTTP POST request
+			req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+			if err != nil {
+				fmt.Println("Error creating request:", err)
+				os.Exit(1)
+			}
+
+			base64Data := fmt.Sprintf("%s:%s",config.ClientId, config.VLAN)
+			token := base64.StdEncoding.EncodeToString([]byte(base64Data))
+			// Set headers
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Basic "+token)
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				stream.Write([]byte(fmt.Sprintf("Error sending request: %v", err)))
+			}
+			defer resp.Body.Close()
+
+			// Print the response
+			stream.Write([]byte(fmt.Sprintf("Response Status: %s", resp.Status)))
+
+		}else {
+			cmd := exec.Command("sh", "-c", "base64 -w 0 /var/lib/rancher/k3s/server/tls/server-ca.crt")
+			
+			// Run the command and pipe output to the stream
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				stream.Write([]byte(fmt.Sprintf("failed to get public key: %v\n", err)))
+				return
+			}
+
+
+			// Data to be sent in JSON format
+			data := Payload{
+				IP: config.IP,
+				Host: stream.Conn().LocalPeer().String(),
+				PublicKey:    string(output),
+			}
+
+			// Marshal the data to JSON
+			jsonData, err := json.Marshal(data)
+			if err != nil {
+				fmt.Println("Error marshaling JSON:", err)
+				os.Exit(1)
+			}
+
+			url := "https://k3sphere.com/api/cluster/register"
+			// Create a new HTTP POST request
+			req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+			if err != nil {
+				fmt.Println("Error creating request:", err)
+				os.Exit(1)
+			}
+
+			base64Data := fmt.Sprintf("%s:%s",config.ClientId, config.VLAN)
+			token := base64.StdEncoding.EncodeToString([]byte(base64Data))
+			// Set headers
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Basic "+token)
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				stream.Write([]byte(fmt.Sprintf("Error sending request: %v", err)))
+			}
+			defer resp.Body.Close()
+
+			// Print the response
+			stream.Write([]byte(fmt.Sprintf("Response Status: %s", resp.Status)))
+
+		}
+	case "getJoinKey":
+		if mode == "podman" {
+			 // Construct the command to attach the SSH key
+			 cmd := exec.Command("podman", "machine", "ssh", "sudo cat /var/lib/rancher/k3s/server/node-token")
+			
+			 // Run the command and pipe output to the stream
+			 output, err := cmd.CombinedOutput()
+			 if err != nil {
+				 stream.Write([]byte(fmt.Sprintf("failed to attach SSH key: %v\n", err)))
+				 return
+			 }
+			 stream.Write([]byte(fmt.Sprintf("join key: %s\n", strings.TrimSpace(string(output)))))
+		}else {
+			cmd := exec.Command("sh", "-c", "sudo cat /var/lib/rancher/k3s/server/node-token")
+			
+			// Run the command and pipe output to the stream
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				stream.Write([]byte(fmt.Sprintf("failed to attach SSH key: %v\n", err)))
+				return
+			}
+			stream.Write([]byte(fmt.Sprintf("join key: %s\n", strings.TrimSpace(string(output)))))
+		}
+	case "joinK3s":
+		if mode == "podman" {
+
+			command := fmt.Sprintf(`curl -sfL https://get.k3s.io | K3S_URL="https://%s:6443" K3S_TOKEN="%s" INSTALL_K3S_EXEC="--node-ip=%s --flannel-iface=%s" sh -`,formData.Arg1, formData.Arg2,config.IP,config.Interface)
+
+
+
+			fmt.Println("command line: " + command)
+			// Output the installation command
+			stream.Write([]byte("Run the following command to install K3s with all local IPs:"))
+			stream.Write([]byte(command))
+
+			cmd := exec.Command("podman", "machine", "ssh", command)
+			
+			// Run the command and pipe output to the stream
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				stream.Write([]byte(fmt.Sprintf("failed to create k3s cluster: %v\n", err)))
+				return
+			}
+			stream.Write([]byte(fmt.Sprintf("join k3s cluster: %s\n", strings.TrimSpace(string(output)))))
+		}else {
+
+			command := fmt.Sprintf(`curl -sfL https://get.k3s.io | K3S_URL="https://%s:6443" K3S_TOKEN="%s" INSTALL_K3S_EXEC="--node-ip=%s --flannel-iface=%s" sh -`,formData.Arg1, formData.Arg2,config.IP,config.Interface)
+
+
+
+			fmt.Println("command line: " + command)
+			// Output the installation command
+			stream.Write([]byte("Run the following command to install K3s with all local IPs:"))
+			stream.Write([]byte(command))
+
+			cmd := exec.Command("sh", "-c", command)
+			
+			// Run the command and pipe output to the stream
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				stream.Write([]byte(fmt.Sprintf("failed to attach SSH key: %v\n", err)))
+				return
+			}
+			stream.Write([]byte(fmt.Sprintf("join k3s cluster output: %s\n", strings.TrimSpace(string(output)))))
 		}
 	}
 }

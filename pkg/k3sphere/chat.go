@@ -307,7 +307,7 @@ func executeCommand(stream network.Stream, mode string, formData FormSchema, con
 	case "registerK3s":
 		if mode == "podman" {
 			 // Construct the command to attach the SSH key
-			 cmd := exec.Command("podman", "machine", "ssh", "base64 -w 0 /var/lib/rancher/k3s/server/tls/server-ca.crt")
+			 cmd := exec.Command("podman", "machine", "ssh", "sudo base64 -w 0 /var/lib/rancher/k3s/server/tls/server-ca.crt")
 			
 			 // Run the command and pipe output to the stream
 			 output, err := cmd.CombinedOutput()
@@ -355,7 +355,7 @@ func executeCommand(stream network.Stream, mode string, formData FormSchema, con
 			stream.Write([]byte(fmt.Sprintf("Response Status: %s", resp.Status)))
 
 		}else {
-			cmd := exec.Command("sh", "-c", "base64 -w 0 /var/lib/rancher/k3s/server/tls/server-ca.crt")
+			cmd := exec.Command("sh", "-c", "sudo base64 -w 0 /var/lib/rancher/k3s/server/tls/server-ca.crt")
 			
 			// Run the command and pipe output to the stream
 			output, err := cmd.CombinedOutput()

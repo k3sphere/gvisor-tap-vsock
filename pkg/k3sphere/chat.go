@@ -259,7 +259,7 @@ func executeCommand(stream network.Stream, mode string, formData FormSchema, con
 
 			tlsSanArgs := " --tls-san=" + fmt.Sprintf("api.%s.k3sphere.io",config.ClusterName) + oidcArgs
 		
-			traefikConfig := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(traefik, formData.Arg1)))
+			traefikConfig := base64.StdEncoding.EncodeToString([]byte(traefik))
 			traefikConfigCmd := fmt.Sprintf("sudo mkdir -p /var/lib/rancher/k3s/server/manifests/ && echo %s | base64 -d | sudo tee /var/lib/rancher/k3s/server/manifests/traefik-config.yaml > /dev/null", traefikConfig)
 			installCommand := fmt.Sprintf("%s && curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=\"%s\" sh -", traefikConfigCmd, tlsSanArgs)
 			// Output the installation command

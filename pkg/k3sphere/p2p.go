@@ -42,6 +42,7 @@ const (
 )
 const LIBP2P_LOGGING = "/gvisor/libp2p-logging/1.0.0"
 const LIBP2P_CONFIG = "/gvisor/libp2p-config/1.0.0"
+
 var defaultSwarmKey = ""
 
 type discoveryNotifee struct {
@@ -59,15 +60,20 @@ type P2P struct {
 	// Represents the peer discovery service
 	Discovery *discovery.RoutingDiscovery
 	// Represents the PubSub Handler
-	PubSub       *pubsub.PubSub
-	p2pNATMap    map[tcpip.Address]string
-	cachedETag   string
-	Blacklist    map[peer.ID]struct{}
+	PubSub     *pubsub.PubSub
+	p2pNATMap  map[tcpip.Address]string
+	cidrMap    map[string]tcpip.Address
+	cachedETag string
+	Blacklist  map[peer.ID]struct{}
 
 	// Buffer for caching audit log entries
 	auditLogBuffer []*LogEntry
 	bufferMutex    sync.Mutex
-	machineMap	 map[string]*Machine
+	machineMap     map[string]*Machine
+}
+
+func (p2p *P2P) RemoveCidrMap(cidr string) {
+	delete(p2p.cidrMap, cidr)
 }
 
 func (p2p *P2P) ProvideService() {
@@ -197,6 +203,7 @@ func NewP2P(key string, relay string, swarmKey string, public bool) *P2P {
 		PubSub:         pubsubhandler,
 		Discovery:      routingdiscovery,
 		p2pNATMap:      make(map[tcpip.Address]string),
+		cidrMap:        make(map[string]tcpip.Address),
 		cachedETag:     "",
 		Blacklist:      blacklist,
 		auditLogBuffer: []*LogEntry{},
@@ -212,8 +219,27 @@ func (p2p *P2P) AddP2pNATMap(peer string, ip string) {
 	p2p.p2pNATMap[tcpip.AddrFrom4Slice(net.ParseIP(ip).To4())] = peer
 }
 
+func (p2p *P2P) AddCidrMap(cidr string, ip string) {
+	p2p.cidrMap[cidr] = tcpip.AddrFrom4Slice(net.ParseIP(ip).To4())
+}
+
 // GetPeerByIP retrieves the peer associated with a given IP
 func (p2p *P2P) GetPeerByIP(ip tcpip.Address) (string, bool) {
+	// check whether ip in cidr map
+	ip3 := net.IP(ip.AsSlice())
+	log.Infof("ip3: %s", ip3)
+	for cidr, ip2 := range p2p.cidrMap {
+		_, subnet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			log.Errorf("Failed to parse CIDR: %v", err)
+			continue
+		}
+		if subnet.Contains(ip3) {
+			log.Infof("Found peer in CIDR map: CIDR=%s, IP=%s", cidr, ip2)
+			peer, exists := p2p.p2pNATMap[ip2]
+			return peer, exists
+		}
+	}
 
 	peer, exists := p2p.p2pNATMap[ip]
 	return peer, exists
@@ -229,7 +255,6 @@ func (p2p *P2P) AddPeerToBlacklist(peerID peer.ID) {
 func (p2p *P2P) RemovePeerFromBlacklist(peerID peer.ID) {
 	delete(p2p.Blacklist, peerID)
 }
-
 
 // A function that generates the p2p configuration options and creates a
 // libp2p host object for the given context. The created host is returned
@@ -264,7 +289,7 @@ func setupHost(ctx context.Context, privateKey string, relayString string, swarm
 		swarmKeyStr = defaultSwarmKey
 	}
 
-	listen := libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/11211","/ip6/::/tcp/11211")
+	listen := libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/11211", "/ip6/::/tcp/11211")
 	// Trace log
 	logrus.Traceln("Generated P2P Routing Configurations.")
 	var opts []libp2p.Option = []libp2p.Option{
@@ -606,7 +631,6 @@ func loadLibp2pPrivateKey(pemStr string) (crypto.PrivKey, error) {
 
 	return libp2pPrivKey, nil
 }
-
 
 func ConnectLibp2p(ctx context.Context, p2phost *P2P, config Config, password string, mode string) error {
 

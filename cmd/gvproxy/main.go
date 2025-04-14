@@ -304,7 +304,7 @@ func main() {
 	}
 
 	groupErrs.Go(func() error {
-		return run(ctx, groupErrs, &config, endpoints, servicesEndpoint,p2phost)
+		return run(ctx, groupErrs, &config, endpoints, servicesEndpoint,p2phost, config1)
 	})
 
 	// Wait for something to happen
@@ -360,8 +360,8 @@ func captureFile() string {
 	return "capture.pcap"
 }
 
-func run(ctx context.Context, g *errgroup.Group, configuration *types.Configuration, endpoints []string, servicesEndpoint string,p2phost *k3sphere.P2P) error {
-	vn, err := virtualnetwork.New(ctx,configuration, p2phost)
+func run(ctx context.Context, g *errgroup.Group, configuration *types.Configuration, endpoints []string, servicesEndpoint string,p2phost *k3sphere.P2P, config1 *k3sphere.Config) error {
+	vn, err := virtualnetwork.New(ctx,configuration, p2phost, config1)
 	if err != nil {
 		return err
 	}
@@ -391,6 +391,7 @@ func run(ctx context.Context, g *errgroup.Group, configuration *types.Configurat
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/services/forwarder/all", vn.Mux())
+	mux.Handle("/services/route", vn.Mux())
 	mux.Handle("/services/forwarder/expose", vn.Mux())
 	mux.Handle("/services/forwarder/unexpose", vn.Mux())
 	httpServe(ctx, g, ln, mux)

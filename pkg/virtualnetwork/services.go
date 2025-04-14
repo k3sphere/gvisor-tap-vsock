@@ -22,7 +22,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 )
 
-func addServices(ctx context.Context, configuration *types.Configuration, s *stack.Stack, ipPool *tap.IPPool, p2pHost *k3sphere.P2P) (http.Handler, error) {
+func addServices(ctx context.Context, configuration *types.Configuration, s *stack.Stack, ipPool *tap.IPPool, p2pHost *k3sphere.P2P, config1 *k3sphere.Config) (http.Handler, error) {
 	var natLock sync.Mutex
 	translation := parseNATTable(configuration)
 
@@ -47,6 +47,61 @@ func addServices(ctx context.Context, configuration *types.Configuration, s *sta
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/forwarder/", http.StripPrefix("/forwarder", forwarderMux))
+	mux.HandleFunc("/route", func(w http.ResponseWriter, r *http.Request) {
+		// Parse query parameters
+		cidr := r.URL.Query().Get("cidr")
+		ip := r.URL.Query().Get("ip")
+
+		// Validate the parameters
+		if cidr == "" {
+			http.Error(w, "Missing 'cidr' or 'ip' parameter", http.StatusBadRequest)
+			return
+		}
+		// Log or process the parameters (example)
+		log.Infof("Received CIDR: %s, IP: %s", cidr, ip)
+
+		if ip == "" {
+			// If no IP is provided, remote the route
+			p2pHost.RemoveCidrMap(cidr)
+			log.Infof("remove route for cidr: %s", cidr)
+		}else if ip == config1.IP {
+			log.Infof("add route for local ip: %s", ip)
+			// parse cidr from 192.168.127.0/24 to with address and mask
+			ip4, subnet, err := net.ParseCIDR(cidr)
+			if err != nil {
+				http.Error(w, "Invalid CIDR format", http.StatusBadRequest)
+				return
+			}
+			address := tcpip.AddrFrom4Slice(ip4.To4())
+			mask := tcpip.AddressMask(tcpip.MaskFromBytes(subnet.Mask))
+			subnetResult, err := tcpip.NewSubnet(address,mask)
+			// get gateway from cidr
+			// Increment the last byte of the subnet's IP to get the gateway IP
+			gatewayIP := subnet.IP.To4()
+			gatewayIP[3]++
+			gateway := tcpip.AddrFrom4Slice(gatewayIP)
+			log.Infof("address: %s, mask: %s, gateway: %s", address, mask, gateway)
+			if err != nil {
+				http.Error(w, "Failed to create subnet: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			log.Infof("subnet: %s", subnetResult)
+			// Add route to the stack
+			s.ReplaceRoute(tcpip.Route{
+				Destination: subnetResult,
+				Gateway:     gateway,
+				NIC: 	  1,
+			})
+		}else {
+			// Call AddCidrMap or other logic with the parameters
+			p2pHost.AddCidrMap(cidr, ip)
+
+		}
+
+		// Respond to the client
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("CIDR and IP processed successfully"))
+	})
 	mux.Handle("/dhcp/", http.StripPrefix("/dhcp", dhcpMux))
 	mux.Handle("/dns/", http.StripPrefix("/dns", dnsMux))
 	return mux, nil

@@ -29,7 +29,7 @@ type VirtualNetwork struct {
 	ipPool        *tap.IPPool
 }
 
-func New(ctx context.Context, configuration *types.Configuration, p2pHost *k3sphere.P2P) (*VirtualNetwork, error) {
+func New(ctx context.Context, configuration *types.Configuration, p2pHost *k3sphere.P2P, config1 *k3sphere.Config) (*VirtualNetwork, error) {
 	_, subnet, err := net.ParseCIDR(configuration.Subnet)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot parse subnet cidr")
@@ -70,7 +70,7 @@ func New(ctx context.Context, configuration *types.Configuration, p2pHost *k3sph
 		return nil, errors.Wrap(err, "cannot create network stack")
 	}
 
-	mux, err := addServices(ctx, configuration, stack, ipPool, p2pHost)
+	mux, err := addServices(ctx, configuration, stack, ipPool, p2pHost, config1)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot add network services")
 	}

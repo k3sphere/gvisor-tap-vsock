@@ -36,6 +36,11 @@ func TCP(ctx context.Context, s *stack.Stack, nat map[tcpip.Address]tcpip.Addres
     	}
     	localAddr := tcpip.AddrFromSlice(buf)
 
+		routeTable := s.GetRouteTable()
+		for _, route := range routeTable {
+			log.Infof("Route: Destination=%s, Gateway=%s, NIC=%d", route.Destination, route.Gateway, route.NIC)
+		}
+
     	buf = make([]byte, 2)
     	// Read 2 bytes from the stream
     	_, err = stream.Read(buf)

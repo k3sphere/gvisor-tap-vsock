@@ -328,7 +328,7 @@ func main() {
 
 	conn1, conn2 := net.Pipe()
 	groupErrs.Go(func() error {
-		return run(ctx, groupErrs, &config, endpoints, servicesEndpoint, conn1, p2phost)
+		return run(ctx, groupErrs, &config, endpoints, servicesEndpoint, conn1, p2phost, config1)
 	})
 
 	// Wait for something to happen
@@ -401,8 +401,8 @@ func captureFile() string {
 	return "capture.pcap"
 }
 
-func run(ctx context.Context, g *errgroup.Group, configuration *types.Configuration, endpoints []string, servicesEndpoint string, conn net.Conn, p2phost *k3sphere.P2P) error {
-	vn, err := virtualnetwork.New(ctx,configuration, p2phost)
+func run(ctx context.Context, g *errgroup.Group, configuration *types.Configuration, endpoints []string, servicesEndpoint string, conn net.Conn, p2phost *k3sphere.P2P, config1 *k3sphere.Config) error {
+	vn, err := virtualnetwork.New(ctx,configuration, p2phost, config1)
 	if err != nil {
 		return err
 	}

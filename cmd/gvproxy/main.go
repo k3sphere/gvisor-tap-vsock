@@ -139,6 +139,12 @@ func main() {
 		password = config1.Password
 	}
 
+	if runtime.GOOS == "windows" {
+		// On Windows, we need to set the default MTU to 1400
+		config1.Interface = "podman-usermode"
+	} else {
+		config1.Interface = "enp0s1"
+	}
 
 	log.Info(version.String())
 	ctx, cancel := context.WithCancel(context.Background())

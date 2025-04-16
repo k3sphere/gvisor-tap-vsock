@@ -250,6 +250,7 @@ func executeCommand(stream network.Stream, mode string, formData FormSchema, con
 
 			oidcArgs += fmt.Sprintf(" --node-ip=%s", config.IP)
 			oidcArgs += fmt.Sprintf(" --advertise-address=%s", config.IP)
+			oidcArgs += " --flannel-backend=host-gw "
 			if runtime.GOOS == "windows" {
 				oidcArgs += fmt.Sprintf(" --flannel-iface=%s", "podman-usermode")
 			} else {
@@ -261,7 +262,7 @@ func executeCommand(stream network.Stream, mode string, formData FormSchema, con
 		
 			traefikConfig := base64.StdEncoding.EncodeToString([]byte(traefik))
 			traefikConfigCmd := fmt.Sprintf("sudo mkdir -p /var/lib/rancher/k3s/server/manifests/ && echo %s | base64 -d | sudo tee /var/lib/rancher/k3s/server/manifests/traefik-config.yaml > /dev/null", traefikConfig)
-			installCommand := fmt.Sprintf("%s && curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=\"%s\" sh -", traefikConfigCmd, tlsSanArgs)
+			installCommand := fmt.Sprintf("%s && curl -sfL https://get.k3sphere.io | INSTALL_K3S_EXEC=\"%s\" sh -", traefikConfigCmd, tlsSanArgs)
 			// Output the installation command
 			stream.Write([]byte("Run the following command to install K3s with all local IPs:"))
 			stream.Write([]byte(installCommand))
@@ -282,6 +283,7 @@ func executeCommand(stream network.Stream, mode string, formData FormSchema, con
 			oidcArgs += fmt.Sprintf(" --kube-apiserver-arg=oidc-groups-claim=%s", "groups")
 			oidcArgs += fmt.Sprintf(" --node-ip=%s", config.IP)
 			oidcArgs += fmt.Sprintf(" --advertise-address=%s", config.IP)
+			oidcArgs += " --flannel-backend=host-gw "
 			oidcArgs += fmt.Sprintf(" --flannel-iface=%s", config.Interface)
 			
 
@@ -289,7 +291,7 @@ func executeCommand(stream network.Stream, mode string, formData FormSchema, con
 		
 			traefikConfig := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(traefik, formData.Arg1)))
 			traefikConfigCmd := fmt.Sprintf("sudo mkdir -p /var/lib/rancher/k3s/server/manifests/ && echo %s | base64 -d | sudo tee /var/lib/rancher/k3s/server/manifests/traefik-config.yaml > /dev/null", traefikConfig)
-			installCommand := fmt.Sprintf("%s && curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=\"%s\" sh -", traefikConfigCmd, tlsSanArgs)
+			installCommand := fmt.Sprintf("%s && curl -sfL https://get.k3sphere.io | INSTALL_K3S_EXEC=\"%s\" sh -", traefikConfigCmd, tlsSanArgs)
 			// Output the installation command
 			stream.Write([]byte("Run the following command to install K3s with all local IPs:"))
 			stream.Write([]byte(installCommand))
@@ -430,7 +432,7 @@ func executeCommand(stream network.Stream, mode string, formData FormSchema, con
 	case "joinK3s":
 		if mode == "podman" {
 
-			command := fmt.Sprintf(`curl -sfL https://get.k3s.io | K3S_URL="https://%s:6443" K3S_TOKEN="%s" INSTALL_K3S_EXEC="--node-ip=%s --flannel-iface=%s" sh -`,formData.Arg1, formData.Arg2,config.IP,config.Interface)
+			command := fmt.Sprintf(`curl -sfL https://get.k3sphere.io | K3S_URL="https://%s:6443" K3S_TOKEN="%s" INSTALL_K3S_EXEC="--node-ip=%s --flannel-iface=%s" sh -`,formData.Arg1, formData.Arg2,config.IP,config.Interface)
 
 
 
@@ -450,7 +452,7 @@ func executeCommand(stream network.Stream, mode string, formData FormSchema, con
 			stream.Write([]byte(fmt.Sprintf("join k3s cluster: %s\n", strings.TrimSpace(string(output)))))
 		}else {
 
-			command := fmt.Sprintf(`curl -sfL https://get.k3s.io | K3S_URL="https://%s:6443" K3S_TOKEN="%s" INSTALL_K3S_EXEC="--node-ip=%s --flannel-iface=%s" sh -`,formData.Arg1, formData.Arg2,config.IP,config.Interface)
+			command := fmt.Sprintf(`curl -sfL https://get.k3sphere.io | K3S_URL="https://%s:6443" K3S_TOKEN="%s" INSTALL_K3S_EXEC="--node-ip=%s --flannel-iface=%s" sh -`,formData.Arg1, formData.Arg2,config.IP,config.Interface)
 
 
 

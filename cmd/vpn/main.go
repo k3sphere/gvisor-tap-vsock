@@ -165,6 +165,36 @@ func main() {
 
 	log.Info(version.String())
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Setup signal channel for catching user signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+
+	// Cleanup function
+	cleanup := func() {
+		log.Info("Performing cleanup...")
+		if len(pidFile) > 0 {
+			if err := os.Remove(pidFile); err != nil {
+				log.Errorf("Failed to remove PID file: %v", err)
+			}
+		}
+		if !tapPreexists {
+			if err := cleanupTapInterface(iface); err != nil {
+				log.Errorf("Failed to clean up TAP interface: %v", err)
+			}
+		}
+		cancel()
+	}
+
+	// Goroutine to handle signals
+	go func() {
+		<-sigChan
+		log.Info("Signal received, shutting down...")
+		cleanup()
+		os.Exit(0)
+	}()
+
 	// Make this the last defer statement in the stack
 	defer os.Exit(exitCode)
 
@@ -174,9 +204,6 @@ func main() {
 	log.Infof("Completed P2P Setup %s", relay)
 
 	groupErrs, ctx := errgroup.WithContext(ctx)
-	// Setup signal channel for catching user signals
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 
 	if debug {
 		log.SetLevel(log.DebugLevel)
@@ -372,6 +399,9 @@ func main() {
 		log.Errorf("gvproxy exiting: %v", err)
 		exitCode = 1
 	}
+
+	// Perform cleanup before exiting
+	cleanup()
 }
 
 func getForwardsMap(sshPort int, sshHostPort string) map[string]string {
@@ -832,4 +862,19 @@ func tx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
 			return
 		}
 	}
+}
+
+func cleanupTapInterface(iface string) error {
+	link, err := netlink.LinkByName(iface)
+	if err != nil {
+		return fmt.Errorf("failed to find interface %s: %w", iface, err)
+	}
+	if err := netlink.LinkSetDown(link); err != nil {
+		return fmt.Errorf("failed to bring down interface %s: %w", iface, err)
+	}
+	if err := netlink.LinkDel(link); err != nil {
+		return fmt.Errorf("failed to delete interface %s: %w", iface, err)
+	}
+	log.Infof("Successfully cleaned up TAP interface: %s", iface)
+	return nil
 }

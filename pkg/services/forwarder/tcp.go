@@ -144,7 +144,7 @@ func TCP(ctx context.Context, s *stack.Stack, nat map[tcpip.Address]tcpip.Addres
         	addr := r.ID().LocalAddress.As4() // Now addr is addressable
         	_, err2 := libp2pStream.Write(addr[:])
         	if err2 != nil {
-        		log.Errorf("r.CreateEndpoint() = %v", err2)
+        		log.Errorf("failed to write address local address %v", err2)
         	}
 
 			buf := make([]byte, 2) // Assuming 4 bytes (int32)
@@ -152,7 +152,7 @@ func TCP(ctx context.Context, s *stack.Stack, nat map[tcpip.Address]tcpip.Addres
         	binary.BigEndian.PutUint16(buf, uint16(r.ID().LocalPort))
 			_, err2 = libp2pStream.Write(buf)
         	if err2 != nil {
-        		log.Errorf("r.CreateEndpoint() = %v", err2)
+        		log.Errorf("failed to write address local port %v", err2)
         	}
 
         	// Write the buffer to the stream
@@ -160,7 +160,7 @@ func TCP(ctx context.Context, s *stack.Stack, nat map[tcpip.Address]tcpip.Addres
         	addr = r.ID().RemoteAddress.As4() // Now addr is addressable
         	_, err2 = libp2pStream.Write(addr[:])
         	if err2 != nil {
-        		log.Errorf("r.CreateEndpoint() = %v", err2)
+        		log.Errorf("failed to write address remote address %v", err2)
         	}
 
 			buf = make([]byte, 2) // Assuming 4 bytes (int32)
@@ -168,23 +168,18 @@ func TCP(ctx context.Context, s *stack.Stack, nat map[tcpip.Address]tcpip.Addres
         	binary.BigEndian.PutUint16(buf, uint16(r.ID().RemotePort))
 			_, err2 = libp2pStream.Write(buf)
         	if err2 != nil {
-        		log.Errorf("r.CreateEndpoint() = %v", err2)
+        		log.Errorf("failed to write address remote port %v", err2)
         	}
 
         	localAddr, _ := net.ResolveTCPAddr("tcp",fmt.Sprintf("%s:%d",localAddress,r.ID().LocalPort))
         	remoteAddr, _ := net.ResolveTCPAddr("tcp",fmt.Sprintf("%s:%d",r.ID().RemoteAddress,r.ID().RemotePort))
         	outbound := NewStreamConn(localAddr, remoteAddr,libp2pStream)
-        	if err != nil {
-        		log.Tracef("net.Dial() = %v", err)
-        		r.Complete(true)
-        		return
-        	}
 
         	var wq waiter.Queue
         	ep, tcpErr := r.CreateEndpoint(&wq)
         	r.Complete(false)
         	if tcpErr != nil {
-        		log.Errorf("r.CreateEndpoint() = %v", tcpErr)
+        		log.Errorf("failed to create endpoint %v", tcpErr)
         		return
         	}
 
@@ -196,32 +191,32 @@ func TCP(ctx context.Context, s *stack.Stack, nat map[tcpip.Address]tcpip.Addres
         	remote.HandleConn(gonet.NewTCPConn(&wq, ep))
 
         } else {
-		outbound, err := net.Dial("tcp", fmt.Sprintf("%s:%d", localAddress, r.ID().LocalPort))
-		if err != nil {
-			log.Tracef("net.Dial() = %v", err)
-			r.Complete(true)
-			return
-		}
-
-		var wq waiter.Queue
-		ep, tcpErr := r.CreateEndpoint(&wq)
-		r.Complete(false)
-		if tcpErr != nil {
-			if _, ok := tcpErr.(*tcpip.ErrConnectionRefused); ok {
-				// transient error
-				log.Debugf("r.CreateEndpoint() = %v", tcpErr)
-			} else {
-				log.Errorf("r.CreateEndpoint() = %v", tcpErr)
+			outbound, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", localAddress, r.ID().LocalPort), 3*time.Second) // Set a 10-second timeout
+			if err != nil {
+				log.Tracef("net.DialTimeout() = %v", err)
+				r.Complete(true)
+				return
 			}
-			return
-		}
 
-		remote := tcpproxy.DialProxy{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return outbound, nil
-			},
-		}
-		remote.HandleConn(gonet.NewTCPConn(&wq, ep))
+			var wq waiter.Queue
+			ep, tcpErr := r.CreateEndpoint(&wq)
+			r.Complete(false)
+			if tcpErr != nil {
+				if _, ok := tcpErr.(*tcpip.ErrConnectionRefused); ok {
+					// transient error
+					log.Debugf("r.CreateEndpoint() = %v", tcpErr)
+				} else {
+					log.Errorf("r.CreateEndpoint() = %v", tcpErr)
+				}
+				return
+			}
+
+			remote := tcpproxy.DialProxy{
+				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+					return outbound, nil
+				},
+			}
+			remote.HandleConn(gonet.NewTCPConn(&wq, ep))
         }
 	})
 }

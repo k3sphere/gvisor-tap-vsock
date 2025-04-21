@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/containers/gvisor-tap-vsock/pkg/k3sphere"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -77,10 +79,68 @@ func UDP(ctx context.Context, s *stack.Stack, nat map[tcpip.Address]tcpip.Addres
 			IP:   net.IP(srcAddr.AsSlice()),
 			Port: int(srcNum),
 		}
-        p, _ := NewUDPProxy(&autoStoppingListener{underlying: NewStreamPacketConn(srcAddress, stream)}, func() (net.Conn, error) {
-            return gonet.DialUDP(s, nil, &address, ipv4.ProtocolNumber)
-        })
-        go p.Run()
+		log.Infof("Received number: %s %d", srcAddress, num)
+		log.Infof("Received number: %s %d", address, num)
+		
+		type UDPConnection interface {
+    		SetReadDeadline(t time.Time) error
+    		Write(b []byte) (int, error)
+    		Read(b []byte) (int, error)
+    		Close() error
+    	}
+    	
+    	var proxyConn UDPConnection
+
+
+		proxyConn, err = gonet.DialUDP(s, nil, &address, ipv4.ProtocolNumber)
+	
+    	if err != nil {
+    		fmt.Println("Error sending message:", err)
+    	}
+
+    	defer proxyConn.Close()
+    	defer stream.Close()
+    	readBuf := make([]byte, UDPBufSize)
+    	for {
+    		read, err := stream.Read(readBuf)
+    		if err != nil {
+    			// NOTE: Apparently ReadFrom doesn't return
+    			// ECONNREFUSED like Read do (see comment in
+    			// UDPProxy.replyLoop)
+    			if !isClosedError(err) {
+    				log.Debugf("Stopping udp proxy (%s)", err)
+    			}
+    			break
+    		}
+    		for i := 0; i != read; {
+    			_ = proxyConn.SetReadDeadline(time.Now().Add(UDPConnTrackTimeout))
+    			written, err := proxyConn.Write(readBuf[i:read])
+    			if err != nil {
+    				log.Errorf("Can't proxy a datagram to udp: %s\n", err)
+    				break
+    			}
+    			i += written
+    		}
+
+    		read, err = proxyConn.Read(readBuf)
+    		if err != nil {
+    			if err, ok := err.(*net.OpError); ok && err.Err == syscall.ECONNREFUSED {
+    				// This will happen if the last write failed
+    				// (e.g: nothing is actually listening on the
+    				// proxied port on the container), ignore it
+    				// and continue until UDPConnTrackTimeout
+
+    			}
+    			return
+    		}
+    		for i := 0; i != read; {
+    			written, err := stream.Write(readBuf[i:read])
+    			if err != nil {
+    				return
+    			}
+    			i += written
+    		}
+    	}
     	
 
     	

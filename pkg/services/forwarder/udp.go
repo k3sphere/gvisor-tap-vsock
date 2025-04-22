@@ -26,123 +26,123 @@ const LIBP2P_TAP_UDP = "/gvisor/libp2p-tap-udp/1.0.0"
 
 func UDP(ctx context.Context, s *stack.Stack, nat map[tcpip.Address]tcpip.Address, natLock *sync.Mutex, p2pHost *k3sphere.P2P) *udp.Forwarder {
     p2pHost.Host.SetStreamHandler(LIBP2P_TAP_UDP, func(stream network.Stream) {
-    	
-        buf := make([]byte, 4)
+    	go func () {
+			buf := make([]byte, 4)
 
-        // Read 4 bytes from the stream
-        _, err := stream.Read(buf)
-        if err != nil {
-        	log.Printf("Error reading from stream: %v", err)
-        	return
-        }
-        srcAddr := tcpip.AddrFromSlice(buf)
+			// Read 4 bytes from the stream
+			_, err := stream.Read(buf)
+			if err != nil {
+				log.Printf("Error reading from stream: %v", err)
+				return
+			}
+			srcAddr := tcpip.AddrFromSlice(buf)
 
-        buf = make([]byte, 2)
+			buf = make([]byte, 2)
 
-        // Read 2 bytes from the stream
-        _, err = stream.Read(buf)
-        if err != nil {
-        	log.Printf("Error reading from stream: %v", err)
-        	return
-        }
+			// Read 2 bytes from the stream
+			_, err = stream.Read(buf)
+			if err != nil {
+				log.Printf("Error reading from stream: %v", err)
+				return
+			}
 
-        // Decode the integer using BigEndian
-        srcNum := binary.BigEndian.Uint16(buf)
-    	buf = make([]byte, 4)
+			// Decode the integer using BigEndian
+			srcNum := binary.BigEndian.Uint16(buf)
+			buf = make([]byte, 4)
 
-    	// Read 4 bytes from the stream
-    	_, err = stream.Read(buf)
-    	if err != nil {
-    		log.Printf("Error reading from stream: %v", err)
-    		return
-    	}
-    	addr := tcpip.AddrFromSlice(buf)
+			// Read 4 bytes from the stream
+			_, err = stream.Read(buf)
+			if err != nil {
+				log.Printf("Error reading from stream: %v", err)
+				return
+			}
+			addr := tcpip.AddrFromSlice(buf)
 
-    	buf = make([]byte, 2)
+			buf = make([]byte, 2)
 
-    	// Read 4 bytes from the stream
-    	_, err = stream.Read(buf)
-    	if err != nil {
-    		log.Printf("Error reading from stream: %v", err)
-    		return
-    	}
+			// Read 4 bytes from the stream
+			_, err = stream.Read(buf)
+			if err != nil {
+				log.Printf("Error reading from stream: %v", err)
+				return
+			}
 
-    	// Decode the integer using BigEndian
-    	num := binary.BigEndian.Uint16(buf)
+			// Decode the integer using BigEndian
+			num := binary.BigEndian.Uint16(buf)
 
-    	log.Printf("Received number: %s %d", addr, num)
-		address := tcpip.FullAddress{
-			Addr: addr,
-			Port: num,
-		}
-		srcAddress := &net.UDPAddr{
-			IP:   net.IP(srcAddr.AsSlice()),
-			Port: int(srcNum),
-		}
-		log.Infof("Received number: %s %d", srcAddress, num)
-		log.Infof("Received number: %s %d", address, num)
+			log.Printf("Received number: %s %d", addr, num)
+			address := tcpip.FullAddress{
+				Addr: addr,
+				Port: num,
+			}
+			srcAddress := &net.UDPAddr{
+				IP:   net.IP(srcAddr.AsSlice()),
+				Port: int(srcNum),
+			}
+			log.Infof("Received number: %s %d", srcAddress, num)
+			log.Infof("Received number: %s %d", address, num)
+			
+			type UDPConnection interface {
+				SetReadDeadline(t time.Time) error
+				Write(b []byte) (int, error)
+				Read(b []byte) (int, error)
+				Close() error
+			}
+			
+			var proxyConn UDPConnection
+
+
+			proxyConn, err = gonet.DialUDP(s, nil, &address, ipv4.ProtocolNumber)
 		
-		type UDPConnection interface {
-    		SetReadDeadline(t time.Time) error
-    		Write(b []byte) (int, error)
-    		Read(b []byte) (int, error)
-    		Close() error
-    	}
-    	
-    	var proxyConn UDPConnection
+			if err != nil {
+				fmt.Println("Error sending message:", err)
+			}
 
+			defer proxyConn.Close()
+			defer stream.Close()
+			readBuf := make([]byte, UDPBufSize)
+			for {
+				read, err := stream.Read(readBuf)
+				if err != nil {
+					// NOTE: Apparently ReadFrom doesn't return
+					// ECONNREFUSED like Read do (see comment in
+					// UDPProxy.replyLoop)
+					if !isClosedError(err) {
+						log.Debugf("Stopping udp proxy (%s)", err)
+					}
+					break
+				}
+				for i := 0; i != read; {
+					_ = proxyConn.SetReadDeadline(time.Now().Add(UDPConnTrackTimeout))
+					written, err := proxyConn.Write(readBuf[i:read])
+					if err != nil {
+						log.Errorf("Can't proxy a datagram to udp: %s\n", err)
+						break
+					}
+					i += written
+				}
 
-		proxyConn, err = gonet.DialUDP(s, nil, &address, ipv4.ProtocolNumber)
-	
-    	if err != nil {
-    		fmt.Println("Error sending message:", err)
-    	}
+				read, err = proxyConn.Read(readBuf)
+				if err != nil {
+					if err, ok := err.(*net.OpError); ok && err.Err == syscall.ECONNREFUSED {
+						// This will happen if the last write failed
+						// (e.g: nothing is actually listening on the
+						// proxied port on the container), ignore it
+						// and continue until UDPConnTrackTimeout
 
-    	defer proxyConn.Close()
-    	defer stream.Close()
-    	readBuf := make([]byte, UDPBufSize)
-    	for {
-    		read, err := stream.Read(readBuf)
-    		if err != nil {
-    			// NOTE: Apparently ReadFrom doesn't return
-    			// ECONNREFUSED like Read do (see comment in
-    			// UDPProxy.replyLoop)
-    			if !isClosedError(err) {
-    				log.Debugf("Stopping udp proxy (%s)", err)
-    			}
-    			break
-    		}
-    		for i := 0; i != read; {
-    			_ = proxyConn.SetReadDeadline(time.Now().Add(UDPConnTrackTimeout))
-    			written, err := proxyConn.Write(readBuf[i:read])
-    			if err != nil {
-    				log.Errorf("Can't proxy a datagram to udp: %s\n", err)
-    				break
-    			}
-    			i += written
-    		}
-
-    		read, err = proxyConn.Read(readBuf)
-    		if err != nil {
-    			if err, ok := err.(*net.OpError); ok && err.Err == syscall.ECONNREFUSED {
-    				// This will happen if the last write failed
-    				// (e.g: nothing is actually listening on the
-    				// proxied port on the container), ignore it
-    				// and continue until UDPConnTrackTimeout
-
-    			}
-    			return
-    		}
-    		for i := 0; i != read; {
-    			written, err := stream.Write(readBuf[i:read])
-    			if err != nil {
-    				return
-    			}
-    			i += written
-    		}
-    	}
-    	
-
+					}
+					return
+				}
+				for i := 0; i != read; {
+					written, err := stream.Write(readBuf[i:read])
+					if err != nil {
+						return
+					}
+					i += written
+				}
+			}
+			
+		}()
     	
     })
     return udp.NewForwarder(s, func(r *udp.ForwarderRequest) {

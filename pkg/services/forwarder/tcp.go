@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -191,13 +192,31 @@ func TCP(ctx context.Context, s *stack.Stack, nat map[tcpip.Address]tcpip.Addres
         	remote.HandleConn(gonet.NewTCPConn(&wq, ep))
 
         } else {
-			outbound, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", localAddress, r.ID().LocalPort), 3*time.Second) // Set a 10-second timeout
-			if err != nil {
-				log.Tracef("net.DialTimeout() = %v", err)
-				r.Complete(true)
-				return
+			externalIP := os.Getenv("EXTERNAL_IP")
+			var outbound net.Conn
+			var err error
+			if externalIP != "" {
+				dialer := &net.Dialer{
+					LocalAddr: &net.TCPAddr{
+						IP:   net.ParseIP(externalIP), // Replace with the desired local IP
+						Port: 0,                           // Let the OS choose the port
+					},
+					Timeout: 3 * time.Second, // Set the timeout
+				}
+				outbound, err = dialer.Dial("tcp", fmt.Sprintf("%s:%d", localAddress, r.ID().LocalPort)) // Set a 10-second timeout
+				if err != nil {
+					log.Tracef("net.DialTimeout() = %v", err)
+					r.Complete(true)
+					return
+				}
+			}else {
+				outbound, err = net.DialTimeout("tcp", fmt.Sprintf("%s:%d", localAddress, r.ID().LocalPort), 3*time.Second) // Set a 10-second timeout
+				if err != nil {
+					log.Tracef("net.DialTimeout() = %v", err)
+					r.Complete(true)
+					return
+				}
 			}
-
 			var wq waiter.Queue
 			ep, tcpErr := r.CreateEndpoint(&wq)
 			r.Complete(false)

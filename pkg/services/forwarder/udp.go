@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"syscall"
 	"time"
@@ -239,7 +240,19 @@ func UDP(ctx context.Context, s *stack.Stack, nat map[tcpip.Address]tcpip.Addres
 		}
 
 		p, _ := NewUDPProxy(&autoStoppingListener{underlying: gonet.NewUDPConn(&wq, ep)}, func() (net.Conn, error) {
-			return net.Dial("udp", fmt.Sprintf("%s:%d", localAddress, r.ID().LocalPort))
+			externalIP := os.Getenv("EXTERNAL_IP")
+			if externalIP != "" {
+				dialer := &net.Dialer{
+					LocalAddr: &net.UDPAddr{
+						IP:   net.ParseIP(externalIP), // Replace with the desired local IP
+						Port: 0,                           // Let the OS choose the port
+					},
+					Timeout: 3 * time.Second, // Set the timeout
+				}
+				return dialer.Dial("udp", fmt.Sprintf("%s:%d", localAddress, r.ID().LocalPort))
+			}else {
+				return net.Dial("udp", fmt.Sprintf("%s:%d", localAddress, r.ID().LocalPort))
+			}
 		})
 		go func() {
 			p.Run()

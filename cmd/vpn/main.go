@@ -786,19 +786,74 @@ func linkUp() error {
 }
 
 func dhcp() error {
-    // Use the ip command to assign an IP address without setting a default route
-    cmd := exec.Command("ip", "addr", "add", fmt.Sprintf("%s/%s", ip, strings.Split(subnet, "/")[1]), "dev", iface)
-    cmd.Stderr = os.Stderr
-    cmd.Stdout = os.Stdout
-    if err := cmd.Run(); err != nil {
-        return err
+    // Before configuring DHCP for the new interface, move the existing default route to a separate route table
+	externalIP := os.Getenv("EXTERNAL_IP")
+	if externalIP != "" {	
+		if err := moveDefaultRouteToTable(externalIP,100); err != nil {
+			return fmt.Errorf("failed to move default route: %w", err)
+		}
+	}
+    if _, err := exec.LookPath("udhcpc"); err == nil { // busybox dhcp client
+        cmd := exec.Command("udhcpc", "-f", "-q", "-i", iface, "-v")
+        cmd.Stderr = os.Stderr
+        cmd.Stdout = os.Stdout
+        return cmd.Run()
     }
-
-    // Bring the interface up
-    cmd = exec.Command("ip", "link", "set", iface, "up")
+    cmd := exec.Command("dhclient", "-4", "-d", "-v", iface)
     cmd.Stderr = os.Stderr
     cmd.Stdout = os.Stdout
     return cmd.Run()
+}
+
+func moveDefaultRouteToTable(externalIP string, tableID int) error {
+    routes, err := netlink.RouteList(nil, netlink.FAMILY_V4)
+    if err != nil {
+        return fmt.Errorf("failed to list routes: %w", err)
+    }
+
+    for _, route := range routes {
+        // Check if the route is a default route
+		log.Infof("Route: %v", route)
+		if (route.Dst == nil || route.Dst.String() == "0.0.0.0/0") && route.Src.Equal(net.ParseIP(externalIP)) {
+			// Move the default route to the specified table
+            newRoute := route
+            newRoute.Table = tableID
+            if err := netlink.RouteAdd(&newRoute); err != nil {
+                return fmt.Errorf("failed to add route to table %d: %w", tableID, err)
+            }
+            if err := netlink.RouteDel(&route); err != nil {
+                return fmt.Errorf("failed to delete original default route: %w", err)
+            }
+            log.Infof("Moved default route via %s to table %d", route.Gw, tableID)
+        }
+    }
+
+	// Check if the rule already exists before adding it
+	rule := netlink.NewRule()
+	_, ipNet, err := net.ParseCIDR(fmt.Sprintf("%s/32", externalIP))
+	if err != nil {
+		return fmt.Errorf("failed to parse external IP as CIDR: %w", err)
+	}
+	rule.Src = ipNet
+	rule.Table = tableID
+
+	existingRules, err := netlink.RuleList(netlink.FAMILY_V4)
+	if err != nil {
+		return fmt.Errorf("failed to list existing rules: %w", err)
+	}
+
+	for _, existingRule := range existingRules {
+		if existingRule.Src != nil && existingRule.Src.String() == rule.Src.String() && existingRule.Table == rule.Table {
+			log.Infof("Rule already exists for source %s and table %d", rule.Src, rule.Table)
+			return nil
+		}
+	}
+
+	if err := netlink.RuleAdd(rule); err != nil {
+		return fmt.Errorf("failed to add rule: %w", err)
+	}
+	log.Infof("Added rule for source %s to table %d", rule.Src, rule.Table)
+    return nil
 }
 
 func rx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {

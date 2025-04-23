@@ -298,7 +298,21 @@ func setupHost(ctx context.Context, privateKey string, relayString string, swarm
 		libp2p.WithDialTimeout(time.Second * 60),
 
 		listen,
-		libp2p.Transport(tcp.NewTCPTransport),
+	}
+
+	externalIP := os.Getenv("EXTERNAL_IP")
+	if externalIP != "" {	
+		customDialer := func(raddr multiaddr.Multiaddr) (tcp.ContextDialer, error) {
+			dialer := &net.Dialer{
+				LocalAddr: &net.TCPAddr{
+					IP: net.ParseIP(externalIP),
+				},
+			}
+			return dialer, nil
+		}
+		opts = append(opts, libp2p.Transport(tcp.NewTCPTransport, tcp.WithDialerForAddr(customDialer)))	
+	} else {
+		opts = append(opts, libp2p.Transport(tcp.NewTCPTransport))
 	}
 
 	if swarmKeyStr != "" {

@@ -16,6 +16,7 @@ type Config struct {
 	Interface     string   `json:"interface"`
 	Public     bool   `json:"public"`
 	Password   string   `json:"password"`
+	IsVPN   bool   `json:"is_vpn"`
 }
 
 type JoinInfo struct {

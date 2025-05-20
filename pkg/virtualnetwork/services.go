@@ -2,6 +2,7 @@ package virtualnetwork
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -20,6 +21,8 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
+
+	"github.com/vishvananda/netlink"
 )
 
 func addServices(ctx context.Context, configuration *types.Configuration, s *stack.Stack, ipPool *tap.IPPool, p2pHost *k3sphere.P2P, config1 *k3sphere.Config) (http.Handler, error) {
@@ -95,7 +98,37 @@ func addServices(ctx context.Context, configuration *types.Configuration, s *sta
 		}else {
 			// Call AddCidrMap or other logic with the parameters
 			p2pHost.AddCidrMap(cidr, ip)
-
+			if config1.IsVPN {
+				// set route to the host
+				ip4, subnet, err := net.ParseCIDR(cidr)
+				if err != nil {
+					http.Error(w, "Invalid CIDR format", http.StatusBadRequest)
+					return
+				}
+				address := tcpip.AddrFrom4Slice(ip4.To4())
+				mask := tcpip.AddressMask(tcpip.MaskFromBytes(subnet.Mask))
+				subnetResult, err := tcpip.NewSubnet(address,mask)
+				// get gateway from cidr
+				// Increment the last byte of the subnet's IP to get the gateway IP
+				gatewayIP := subnet.IP.To4()
+				gatewayIP[3]++
+				gateway := tcpip.AddrFrom4Slice(gatewayIP)
+				log.Infof("address: %s, mask: %s, gateway: %s", address, mask, gateway)
+				if err != nil {
+					http.Error(w, "Failed to create subnet: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				log.Infof("subnet: %s", subnetResult)
+				// Add route to the stack
+				newRoute := netlink.Route{
+					Dst:       &net.IPNet{IP: ip4, Mask: subnet.Mask},
+					Gw:        net.ParseIP(config1.GatewayIP),
+				}
+				if err := netlink.RouteAdd(&newRoute); err != nil {
+					http.Error(w, fmt.Sprintf("failed to add route: %v", err), http.StatusInternalServerError)
+					return
+				}
+			}
 		}
 
 		// Respond to the client

@@ -160,7 +160,7 @@ func main() {
 	}
 	
 	config1.Interface = iface
-
+	config1.IsVPN = true
 
 
 	log.Info(version.String())

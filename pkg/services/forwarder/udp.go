@@ -96,6 +96,7 @@ func UDP(ctx context.Context, s *stack.Stack, nat map[tcpip.Address]tcpip.Addres
 		
 			if err != nil {
 				fmt.Println("Error sending message:", err)
+				return
 			}
 
 			defer proxyConn.Close()
